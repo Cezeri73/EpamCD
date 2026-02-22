@@ -7,22 +7,46 @@ jobs:
     runs-on: ubuntu-latest
     name: build Node.js Docker Image and deploy to minikube
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
+    
     - name: Start minikube
-      uses: medyagh/setup-minikube@master
-    - name: Try the cluster !
-      run: kubectl get pods -A
-    - name: Build image
+      uses: medyagh/setup-minikube@latest
+      with:
+        minikube-version: 'latest'
+        driver: 'docker'
+        kubernetes-version: 'stable'
+    
+    - name: Check cluster status
       run: |
-          export SHELL=/bin/bash
-          eval $(minikube -p minikube docker-env)
-          docker build -f ./node-minikube-app/Dockerfile -t devopshint/node-app:latest ./node-minikube-app
-          echo -n "verifying images:"
-          docker images         
+        kubectl cluster-info
+        kubectl get pods -A
+    
+    - name: Validate Kubernetes manifests
+      run: |
+        kubectl apply --dry-run=client -f node-minikube-app/k8s/k8s-node-app.yaml
+    
+    - name: Build Docker image
+      run: |
+        export SHELL=/bin/bash
+        eval $(minikube -p minikube docker-env)
+        docker build -f ./node-minikube-app/Dockerfile -t devopshint/node-app:latest ./node-minikube-app
+        echo "Verifying images:"
+        docker images
+    
     - name: Deploy to minikube
-      run:
+      run: |
         kubectl apply -f node-minikube-app/k8s/k8s-node-app.yaml
+        kubectl rollout status deployment/nodejs-app --timeout=60s
+    
     - name: Test service URLs
       run: |
-          minikube service list
-          minikube service nodejs-app --url
+        kubectl get all
+        minikube service list
+        minikube service nodejs-app --url
+    
+    - name: Minikube logs on failure
+      if: failure()
+      run: |
+        minikube logs
+        kubectl describe pods
+        kubectl get events
